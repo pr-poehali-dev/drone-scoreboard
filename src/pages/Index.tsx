@@ -39,14 +39,16 @@ const LEVELS = [
 ];
 
 const ACHIEVEMENTS_META: Record<string, { title: string; description: string; icon: string; color: string; xpReward: number; condition: string }> = {
-  first_blood:   { title: "Первая кровь",   description: "Завершить первую игровую сессию",   icon: "Zap",     color: "#00ffaa", xpReward: 50,  condition: "1 сессия" },
-  sharp_shooter: { title: "Снайпер",        description: "Достичь точности 90%+ в БАС",       icon: "Target",  color: "#00aaff", xpReward: 150, condition: "Точность ≥ 90%" },
-  speed_demon:   { title: "Демон скорости", description: "Набрать 500+ очков за одну сессию", icon: "Flame",   color: "#ff8800", xpReward: 200, condition: "Очки ≥ 500" },
-  consistency:   { title: "Железная воля", description: "Сыграть 7 дней подряд",              icon: "Shield",  color: "#bf5fff", xpReward: 300, condition: "7-дневная серия" },
-  highscore:     { title: "Рекордсмен",     description: "Набрать 1000+ очков за сессию",     icon: "Trophy",  color: "#ffd700", xpReward: 500, condition: "Очки ≥ 1000" },
-  grind:         { title: "Гриндер",        description: "Сыграть 50 сессий суммарно",         icon: "Swords",  color: "#ff4444", xpReward: 400, condition: "50 сессий" },
-  perfect:       { title: "Перфекционист",  description: "Получить точность 100% в сессии",   icon: "Star",    color: "#ffd700", xpReward: 750, condition: "Точность = 100%" },
-  marathon:      { title: "Марафонец",      description: "Провести 30+ минут в игре за день", icon: "Timer",   color: "#00aaff", xpReward: 250, condition: "30 мин за день" },
+  first_blood:   { title: "Первая кровь",    description: "Завершить первую игровую сессию",         icon: "Zap",        color: "#00ffaa", xpReward: 50,  condition: "1 сессия" },
+  sharp_shooter: { title: "Снайпер",         description: "Достичь точности 90%+ в БАС",             icon: "Target",     color: "#00aaff", xpReward: 150, condition: "Точность ≥ 90%" },
+  speed_demon:   { title: "Демон скорости",  description: "Набрать 500+ очков за одну сессию",       icon: "Flame",      color: "#ff8800", xpReward: 200, condition: "Очки ≥ 500" },
+  consistency:   { title: "Железная воля",   description: "Сыграть 7 дней подряд",                   icon: "Shield",     color: "#bf5fff", xpReward: 300, condition: "7-дневная серия" },
+  highscore:     { title: "Рекордсмен",      description: "Набрать 1000+ очков за сессию",           icon: "Trophy",     color: "#ffd700", xpReward: 500, condition: "Очки ≥ 1000" },
+  grind:         { title: "Гриндер",         description: "Сыграть 50 сессий суммарно",               icon: "Swords",     color: "#ff4444", xpReward: 400, condition: "50 сессий" },
+  perfect:       { title: "Перфекционист",   description: "Получить точность 100% в сессии",         icon: "Star",       color: "#ffd700", xpReward: 750, condition: "Точность = 100%" },
+  marathon:      { title: "Марафонец",       description: "Провести 30+ минут в игре за день",       icon: "Timer",      color: "#00aaff", xpReward: 250, condition: "30 мин за день" },
+  dark_king:     { title: "Король тьмы",     description: "Сыграть 10+ сессий без единого штрафа",   icon: "Crown",      color: "#6600cc", xpReward: 600, condition: "10 сессий без штрафов" },
+  night_hunter:  { title: "Ночной охотник",  description: "Точность ≥ 85% и счёт ≥ 700 в одной сессии", icon: "Moon",  color: "#0066ff", xpReward: 450, condition: "Точность ≥ 85% и счёт ≥ 700" },
 };
 
 const ALL_ACHIEVEMENT_IDS = Object.keys(ACHIEVEMENTS_META);
@@ -71,6 +73,7 @@ interface Session {
   accuracy: number;
   level: string;
   xp_earned: number;
+  penalty_xp: number;
 }
 interface PlayerProfile {
   nickname: string;
@@ -78,12 +81,21 @@ interface PlayerProfile {
   xp: number;
   achievements: { id: string; unlocked_at: string }[];
 }
+interface LeaderEntry {
+  player_id: string;
+  nickname: string;
+  avatar_id: string;
+  xp: number;
+  rank: number;
+  is_me: boolean;
+}
 
 const NAV_ITEMS = [
   { id: "dashboard",    label: "ДАШБОРД",    icon: "LayoutDashboard" },
   { id: "new-session",  label: "СЕССИЯ",     icon: "Plus" },
   { id: "achievements", label: "ДОСТИЖЕНИЯ", icon: "Trophy" },
   { id: "sessions",     label: "ИСТОРИЯ",    icon: "History" },
+  { id: "leaderboard",  label: "РЕЙТИНГ",    icon: "Users" },
   { id: "profile",      label: "ПРОФИЛЬ",    icon: "User" },
 ];
 
@@ -163,9 +175,9 @@ function AchievementCard({ achId, unlockedAt, index }: { achId: string; unlocked
 }
 
 // ─── XP Popup ─────────────────────────────────────────────────────────────────
-function XPPopup({ xp, achievements, onClose }: { xp: number; achievements: string[]; onClose: () => void }) {
+function XPPopup({ xp, achievements, penalty, onClose }: { xp: number; achievements: string[]; penalty: number; onClose: () => void }) {
   useEffect(() => {
-    const t = setTimeout(onClose, 4000);
+    const t = setTimeout(onClose, 5000);
     return () => clearTimeout(t);
   }, [onClose]);
 
@@ -183,6 +195,12 @@ function XPPopup({ xp, achievements, onClose }: { xp: number; achievements: stri
           <div className="text-xs text-muted-foreground font-rajdhani">Сессия сохранена!</div>
         </div>
       </div>
+      {penalty > 0 && (
+        <div className="flex items-center gap-2 mb-2 text-xs font-rajdhani" style={{ color: "#ff4444" }}>
+          <Icon name="AlertTriangle" size={12} />
+          <span>Штраф: −{penalty} XP</span>
+        </div>
+      )}
       {achievements.length > 0 && (
         <div className="space-y-1">
           {achievements.map((id) => {
@@ -365,38 +383,16 @@ function Dashboard({ profile, sessions, onTabChange }: {
   );
 }
 
-function NewSession({ onSuccess }: { onSuccess: (xp: number, achs: string[]) => void }) {
+function NewSession({ onSuccess }: { onSuccess: (xp: number, achs: string[], penaltyXp: number) => void }) {
   const [score, setScore] = useState("");
   const [duration, setDuration] = useState("");
   const [accuracy, setAccuracy] = useState("");
   const [level, setLevel] = useState("Средний");
+  const [penaltyXp, setPenaltyXp] = useState("");
+  const [penaltyReason, setPenaltyReason] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSubmit = async () => {
-    if (!score || !duration || !accuracy) { setError("Заполни все поля"); return; }
-    const sc = parseInt(score), dur = parseInt(duration), acc = parseInt(accuracy);
-    if (isNaN(sc) || isNaN(dur) || isNaN(acc)) { setError("Введи числа"); return; }
-    if (acc < 0 || acc > 100) { setError("Точность: 0–100"); return; }
-
-    setLoading(true); setError("");
-    const res = await fetch(API, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ player_id: PLAYER_ID, score: sc, duration: dur, accuracy: acc, level }),
-    });
-    const data = await res.json();
-    setLoading(false);
-
-    if (res.ok) {
-      setScore(""); setDuration(""); setAccuracy(""); setLevel("Средний");
-      onSuccess(data.xp_earned + (data.bonus_xp || 0), data.new_achievements || []);
-    } else {
-      setError("Ошибка сохранения");
-    }
-  };
-
-  const lvl = getLevelInfo(0);
   const inputStyle = {
     background: "rgba(255,255,255,0.04)",
     border: "1px solid rgba(255,255,255,0.1)",
@@ -409,6 +405,38 @@ function NewSession({ onSuccess }: { onSuccess: (xp: number, achs: string[]) => 
     outline: "none",
   };
 
+  const handleSubmit = async () => {
+    if (!score || !duration || !accuracy) { setError("Заполни все поля"); return; }
+    const sc = parseInt(score), dur = parseInt(duration), acc = parseInt(accuracy);
+    if (isNaN(sc) || isNaN(dur) || isNaN(acc)) { setError("Введи числа"); return; }
+    if (acc < 0 || acc > 100) { setError("Точность: 0–100"); return; }
+    const pen = penaltyXp ? Math.max(0, parseInt(penaltyXp)) : 0;
+
+    setLoading(true); setError("");
+    const res = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        player_id: PLAYER_ID, score: sc, duration: dur, accuracy: acc, level,
+        penalty_xp: pen, penalty_reason: penaltyReason || "Штраф за нарушение",
+      }),
+    });
+    const data = await res.json();
+    setLoading(false);
+
+    if (res.ok) {
+      setScore(""); setDuration(""); setAccuracy(""); setLevel("Средний");
+      setPenaltyXp(""); setPenaltyReason("");
+      onSuccess(data.net_xp + (data.bonus_xp || 0), data.new_achievements || [], data.penalty_xp || 0);
+    } else {
+      setError("Ошибка сохранения");
+    }
+  };
+
+  const previewXp = score && duration && accuracy
+    ? Math.max(0, Math.round(parseInt(score || "0") / 5 + parseInt(duration || "0") * 2) - (parseInt(penaltyXp || "0") || 0))
+    : 0;
+
   return (
     <div className="space-y-6">
       <div>
@@ -416,116 +444,78 @@ function NewSession({ onSuccess }: { onSuccess: (xp: number, achs: string[]) => 
         <p className="text-sm text-muted-foreground font-rajdhani mt-1">Введи результаты и получи XP</p>
       </div>
 
-      <div
-        className="rounded-2xl border p-6 space-y-5"
-        style={{ borderColor: "#00ffaa33", background: "linear-gradient(135deg, hsl(var(--card)), #00ffaa05)" }}
-      >
-        {/* Score */}
+      <div className="rounded-2xl border p-6 space-y-5"
+        style={{ borderColor: "#00ffaa33", background: "linear-gradient(135deg, hsl(var(--card)), #00ffaa05)" }}>
         <div>
           <label className="block text-xs font-orbitron text-muted-foreground uppercase tracking-widest mb-2">Счёт (очки)</label>
-          <input
-            type="number"
-            placeholder="например: 750"
-            value={score}
-            onChange={(e) => setScore(e.target.value)}
-            style={inputStyle}
-            min={0}
-          />
+          <input type="number" placeholder="например: 750" value={score} onChange={(e) => setScore(e.target.value)} style={inputStyle} min={0} />
         </div>
-
-        {/* Duration */}
         <div>
           <label className="block text-xs font-orbitron text-muted-foreground uppercase tracking-widest mb-2">Длительность (мин)</label>
-          <input
-            type="number"
-            placeholder="например: 20"
-            value={duration}
-            onChange={(e) => setDuration(e.target.value)}
-            style={inputStyle}
-            min={1}
-          />
+          <input type="number" placeholder="например: 20" value={duration} onChange={(e) => setDuration(e.target.value)} style={inputStyle} min={1} />
         </div>
-
-        {/* Accuracy */}
         <div>
           <label className="block text-xs font-orbitron text-muted-foreground uppercase tracking-widest mb-2">Точность (%)</label>
-          <input
-            type="number"
-            placeholder="например: 87"
-            value={accuracy}
-            onChange={(e) => setAccuracy(e.target.value)}
-            style={inputStyle}
-            min={0}
-            max={100}
-          />
+          <input type="number" placeholder="например: 87" value={accuracy} onChange={(e) => setAccuracy(e.target.value)} style={inputStyle} min={0} max={100} />
         </div>
 
-        {/* Level */}
         <div>
           <label className="block text-xs font-orbitron text-muted-foreground uppercase tracking-widest mb-2">Режим сложности</label>
           <div className="grid grid-cols-3 gap-2">
             {["Лёгкий", "Средний", "Сложный"].map((l) => (
-              <button
-                key={l}
-                onClick={() => setLevel(l)}
-                className="py-2.5 rounded-lg font-rajdhani text-sm font-semibold transition-all"
+              <button key={l} onClick={() => setLevel(l)} className="py-2.5 rounded-lg font-rajdhani text-sm font-semibold transition-all"
                 style={{
-                  background: level === l
-                    ? (l === "Лёгкий" ? "#00ffaa20" : l === "Средний" ? "#00aaff20" : "#bf5fff20")
-                    : "rgba(255,255,255,0.03)",
-                  border: `1px solid ${level === l
-                    ? (l === "Лёгкий" ? "#00ffaa" : l === "Средний" ? "#00aaff" : "#bf5fff")
-                    : "rgba(255,255,255,0.08)"}`,
-                  color: level === l
-                    ? (l === "Лёгкий" ? "#00ffaa" : l === "Средний" ? "#00aaff" : "#bf5fff")
-                    : "#888",
-                }}
-              >
+                  background: level === l ? (l === "Лёгкий" ? "#00ffaa20" : l === "Средний" ? "#00aaff20" : "#bf5fff20") : "rgba(255,255,255,0.03)",
+                  border: `1px solid ${level === l ? (l === "Лёгкий" ? "#00ffaa" : l === "Средний" ? "#00aaff" : "#bf5fff") : "rgba(255,255,255,0.08)"}`,
+                  color: level === l ? (l === "Лёгкий" ? "#00ffaa" : l === "Средний" ? "#00aaff" : "#bf5fff") : "#888",
+                }}>
                 {l}
               </button>
             ))}
           </div>
         </div>
 
+        {/* Штрафные XP */}
+        <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "#ff444433", background: "#ff44440a" }}>
+          <div className="flex items-center gap-2">
+            <Icon name="AlertTriangle" size={14} style={{ color: "#ff4444" }} />
+            <span className="text-xs font-orbitron uppercase tracking-widest" style={{ color: "#ff4444" }}>Штрафные XP (необязательно)</span>
+          </div>
+          <input type="number" placeholder="Количество штрафных XP" value={penaltyXp} onChange={(e) => setPenaltyXp(e.target.value)}
+            style={{ ...inputStyle, border: "1px solid #ff444433" }} min={0} />
+          <input type="text" placeholder="Причина штрафа" value={penaltyReason} onChange={(e) => setPenaltyReason(e.target.value)}
+            style={{ ...inputStyle, border: "1px solid #ff444433" }} />
+        </div>
+
         {/* XP preview */}
         {score && duration && accuracy && (
           <div className="rounded-lg p-3 flex items-center gap-3" style={{ background: "#00ffaa0a", border: "1px solid #00ffaa22" }}>
             <Icon name="Zap" size={16} style={{ color: "#00ffaa" }} />
-            <span className="text-sm font-rajdhani text-muted-foreground">Примерно получишь:</span>
-            <span className="font-orbitron text-sm font-bold" style={{ color: "#00ffaa" }}>
-              ~{Math.round(parseInt(score || "0") / 5 + parseInt(duration || "0") * 2)} XP
+            <span className="text-sm font-rajdhani text-muted-foreground">Получишь:</span>
+            <span className="font-orbitron text-sm font-bold" style={{ color: previewXp > 0 ? "#00ffaa" : "#ff4444" }}>
+              ~{previewXp} XP
             </span>
+            {penaltyXp && parseInt(penaltyXp) > 0 && (
+              <span className="text-xs font-rajdhani ml-auto" style={{ color: "#ff4444" }}>−{penaltyXp} штраф</span>
+            )}
           </div>
         )}
 
         {error && (
           <div className="text-xs font-rajdhani text-red-400 flex items-center gap-2">
-            <Icon name="AlertCircle" size={12} />
-            {error}
+            <Icon name="AlertCircle" size={12} />{error}
           </div>
         )}
 
-        <button
-          onClick={handleSubmit}
-          disabled={loading}
+        <button onClick={handleSubmit} disabled={loading}
           className="w-full py-4 rounded-xl font-orbitron text-sm font-bold transition-all duration-200 hover:scale-[1.01] disabled:opacity-50 flex items-center justify-center gap-3"
           style={{
             background: loading ? "rgba(0,255,170,0.1)" : "linear-gradient(135deg, #00ffaa, #00aaff)",
             color: "#0a0d14",
             boxShadow: loading ? "none" : "0 0 30px rgba(0,255,170,0.4)",
-          }}
-        >
-          {loading ? (
-            <>
-              <Icon name="Loader" size={16} className="animate-spin" />
-              СОХРАНЕНИЕ...
-            </>
-          ) : (
-            <>
-              <Icon name="Save" size={16} />
-              СОХРАНИТЬ СЕССИЮ
-            </>
-          )}
+          }}>
+          {loading ? <><Icon name="Loader" size={16} className="animate-spin" />СОХРАНЕНИЕ...</>
+                   : <><Icon name="Save" size={16} />СОХРАНИТЬ СЕССИЮ</>}
         </button>
       </div>
     </div>
@@ -657,6 +647,96 @@ function SessionsPage({ sessions }: { sessions: Session[] }) {
   );
 }
 
+function LeaderboardPage({ myXP }: { myXP: number }) {
+  const [board, setBoard] = useState<LeaderEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API}?action=leaderboard&player_id=${encodeURIComponent(PLAYER_ID)}`)
+      .then((r) => r.json())
+      .then((d) => { setBoard(d.leaderboard || []); setLoading(false); });
+  }, []);
+
+  const rankColors = ["#ffd700", "#c0c0c0", "#cd7f32"];
+  const rankEmojis = ["🥇", "🥈", "🥉"];
+  const me = board.find((e) => e.is_me);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="font-orbitron text-xl font-bold text-white">ТАБЛИЦА ЛИДЕРОВ</h2>
+        <p className="text-sm text-muted-foreground font-rajdhani mt-1">Рейтинг всех 15 студентов по XP</p>
+      </div>
+
+      {me && (
+        <div className="rounded-lg border px-4 py-3 flex items-center gap-3"
+          style={{ borderColor: "#00ffaa44", background: "linear-gradient(135deg, hsl(var(--card)), #00ffaa08)", boxShadow: "0 0 20px #00ffaa18" }}>
+          <span className="text-xl">{getAvatarEmoji(me.avatar_id)}</span>
+          <span className="font-rajdhani text-sm text-white">Твоя позиция:</span>
+          <span className="font-orbitron font-bold" style={{ color: "#00ffaa" }}>#{me.rank}</span>
+          <span className="text-muted-foreground font-rajdhani text-sm ml-auto">{me.xp.toLocaleString()} XP</span>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-12 text-muted-foreground font-rajdhani">
+          <Icon name="Loader" size={32} className="mx-auto mb-3 animate-spin opacity-40" />
+          Загрузка...
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {board.map((entry, i) => {
+            const rankColor = rankColors[i] ?? "#555";
+            const lvl = getLevelInfo(entry.xp);
+            return (
+              <div key={entry.player_id}
+                className="flex items-center gap-3 rounded-xl border px-4 py-3 transition-all duration-200 hover:scale-[1.005] animate-fade-in-up"
+                style={{
+                  borderColor: entry.is_me ? "#00ffaa44" : "rgba(255,255,255,0.06)",
+                  background: entry.is_me ? "linear-gradient(135deg, hsl(var(--card)), #00ffaa08)" : "hsl(var(--card))",
+                  boxShadow: i < 3 ? `0 0 14px ${rankColor}22` : "none",
+                  animationDelay: `${i * 50}ms`,
+                }}>
+                {/* Rank */}
+                <div className="w-8 text-center font-orbitron text-sm font-bold shrink-0" style={{ color: rankColor }}>
+                  {i < 3 ? rankEmojis[i] : `#${entry.rank}`}
+                </div>
+                {/* Avatar */}
+                <div className="text-xl shrink-0">{getAvatarEmoji(entry.avatar_id)}</div>
+                {/* Name + level */}
+                <div className="flex-1 min-w-0">
+                  <div className="font-rajdhani font-semibold text-sm truncate" style={{ color: entry.is_me ? "#00ffaa" : "white" }}>
+                    {entry.nickname}
+                    {entry.is_me && <span className="ml-2 text-xs font-orbitron opacity-70" style={{ color: "#00ffaa" }}>(ты)</span>}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Ур. {lvl.level} · {lvl.title}</div>
+                </div>
+                {/* XP bar mini */}
+                <div className="hidden sm:flex flex-col items-end gap-1 w-32 shrink-0">
+                  <div className="w-full bg-white/5 rounded-full h-1.5">
+                    <div className="h-full rounded-full" style={{
+                      width: `${Math.min(100, (entry.xp / 10000) * 100)}%`,
+                      background: `linear-gradient(90deg, ${lvl.color}, ${lvl.color}88)`,
+                      boxShadow: `0 0 6px ${lvl.color}66`,
+                    }} />
+                  </div>
+                  <div className="font-orbitron text-xs font-bold" style={{ color: rankColor }}>
+                    {entry.xp.toLocaleString()} XP
+                  </div>
+                </div>
+                {/* XP mobile */}
+                <div className="sm:hidden font-orbitron text-sm font-bold shrink-0" style={{ color: rankColor }}>
+                  {entry.xp.toLocaleString()}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Profile({ profile, onAvatarChange }: { profile: PlayerProfile | null; onAvatarChange: (id: string) => void }) {
   const xp = profile?.xp ?? 0;
   const lvl = getLevelInfo(xp);
@@ -767,7 +847,7 @@ export default function Index() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [xpPopup, setXpPopup] = useState<{ xp: number; achs: string[] } | null>(null);
+  const [xpPopup, setXpPopup] = useState<{ xp: number; achs: string[]; penalty: number } | null>(null);
 
   const loadProfile = useCallback(async () => {
     const res = await fetch(`${API}?action=profile&player_id=${encodeURIComponent(PLAYER_ID)}`);
@@ -790,8 +870,8 @@ export default function Index() {
     loadSessions();
   }, [loadProfile, loadSessions]);
 
-  const handleSessionSuccess = (xp: number, achs: string[]) => {
-    setXpPopup({ xp, achs });
+  const handleSessionSuccess = (xp: number, achs: string[], penalty: number) => {
+    setXpPopup({ xp, achs, penalty });
     loadProfile();
     loadSessions();
     setActiveTab("dashboard");
@@ -806,7 +886,7 @@ export default function Index() {
   return (
     <div className="min-h-screen bg-background grid-bg scanlines">
       {/* XP Popup */}
-      {xpPopup && <XPPopup xp={xpPopup.xp} achievements={xpPopup.achs} onClose={() => setXpPopup(null)} />}
+      {xpPopup && <XPPopup xp={xpPopup.xp} achievements={xpPopup.achs} penalty={xpPopup.penalty} onClose={() => setXpPopup(null)} />}
 
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 backdrop-blur-md" style={{ background: "rgba(10,13,22,0.92)" }}>
@@ -856,7 +936,7 @@ export default function Index() {
 
         {/* Mobile nav */}
         {mobileMenuOpen && (
-          <div className="md:hidden border-t border-white/5 px-4 py-3 grid grid-cols-5 gap-1"
+          <div className="md:hidden border-t border-white/5 px-4 py-3 grid grid-cols-6 gap-1"
             style={{ background: "rgba(10,13,22,0.98)" }}>
             {NAV_ITEMS.map((item) => (
               <button key={item.id} onClick={() => { setActiveTab(item.id); setMobileMenuOpen(false); }}
@@ -877,6 +957,7 @@ export default function Index() {
           {activeTab === "new-session"  && <NewSession onSuccess={handleSessionSuccess} />}
           {activeTab === "achievements" && <Achievements achievements={profile?.achievements ?? []} />}
           {activeTab === "sessions"     && <SessionsPage sessions={sessions} />}
+          {activeTab === "leaderboard"  && <LeaderboardPage myXP={profile?.xp ?? 0} />}
           {activeTab === "profile"      && <Profile profile={profile} onAvatarChange={handleAvatarChange} />}
         </div>
       </main>

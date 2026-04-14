@@ -1,20 +1,21 @@
-"""API для БАС Арена — сохранение сессий, начисление XP, управление профилем и достижениями"""
+"""API для БАС Арена — сессии, XP, штрафы, лидерборд, достижения"""
 import json
 import os
 import psycopg2
-from datetime import datetime
 
 SCHEMA = "t_p36815849_drone_scoreboard"
 
 ACHIEVEMENTS_CONFIG = [
-    {"id": "first_blood",   "xp": 50,  "check": lambda s, stats: stats["total_sessions"] >= 1},
-    {"id": "sharp_shooter", "xp": 150, "check": lambda s, stats: s.get("accuracy", 0) >= 90},
-    {"id": "speed_demon",   "xp": 200, "check": lambda s, stats: s.get("score", 0) >= 500},
-    {"id": "consistency",   "xp": 300, "check": lambda s, stats: stats["streak_days"] >= 7},
-    {"id": "highscore",     "xp": 500, "check": lambda s, stats: s.get("score", 0) >= 1000},
-    {"id": "grind",         "xp": 400, "check": lambda s, stats: stats["total_sessions"] >= 50},
-    {"id": "perfect",       "xp": 750, "check": lambda s, stats: s.get("accuracy", 0) >= 100},
-    {"id": "marathon",      "xp": 250, "check": lambda s, stats: stats["today_minutes"] >= 30},
+    {"id": "first_blood",   "xp": 50,  "check": lambda s, st: st["total_sessions"] >= 1},
+    {"id": "sharp_shooter", "xp": 150, "check": lambda s, st: s.get("accuracy", 0) >= 90},
+    {"id": "speed_demon",   "xp": 200, "check": lambda s, st: s.get("score", 0) >= 500},
+    {"id": "consistency",   "xp": 300, "check": lambda s, st: st["streak_days"] >= 7},
+    {"id": "highscore",     "xp": 500, "check": lambda s, st: s.get("score", 0) >= 1000},
+    {"id": "grind",         "xp": 400, "check": lambda s, st: st["total_sessions"] >= 50},
+    {"id": "perfect",       "xp": 750, "check": lambda s, st: s.get("accuracy", 0) >= 100},
+    {"id": "marathon",      "xp": 250, "check": lambda s, st: st["today_minutes"] >= 30},
+    {"id": "dark_king",     "xp": 600, "check": lambda s, st: st["total_sessions"] >= 10 and st.get("total_penalties", 0) == 0},
+    {"id": "night_hunter",  "xp": 450, "check": lambda s, st: s.get("accuracy", 0) >= 85 and s.get("score", 0) >= 700},
 ]
 
 def get_conn():
@@ -28,37 +29,33 @@ def calc_xp(score: int, accuracy: int, duration: int) -> int:
 
 def get_player_stats(cur, player_id: str) -> dict:
     cur.execute(f"""
-        SELECT COUNT(*) as total,
-               COALESCE(SUM(duration), 0) as today_min
+        SELECT COUNT(*), COALESCE(SUM(duration), 0)
         FROM {SCHEMA}.sessions
-        WHERE player_id = '{player_id}'
-        AND played_at::date = CURRENT_DATE
+        WHERE player_id = '{player_id}' AND played_at::date = CURRENT_DATE
     """)
     today = cur.fetchone()
-
     cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.sessions WHERE player_id = '{player_id}'")
     total = cur.fetchone()[0]
-
+    cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.penalties WHERE player_id = '{player_id}'")
+    penalties = cur.fetchone()[0]
     return {
         "total_sessions": total,
         "today_minutes": today[1] if today else 0,
         "streak_days": 1,
+        "total_penalties": penalties,
     }
 
-def check_achievements(cur, player_id: str, session: dict, stats: dict) -> list:
+def check_achievements(cur, player_id: str, session: dict, stats: dict):
     cur.execute(f"SELECT achievement_id FROM {SCHEMA}.achievements_unlocked WHERE player_id = '{player_id}'")
     already = {row[0] for row in cur.fetchall()}
-
-    new_achievements = []
-    bonus_xp = 0
+    new_achievements, bonus_xp = [], 0
     for ach in ACHIEVEMENTS_CONFIG:
         if ach["id"] not in already:
             try:
                 if ach["check"](session, stats):
                     cur.execute(f"""
                         INSERT INTO {SCHEMA}.achievements_unlocked (player_id, achievement_id)
-                        VALUES ('{player_id}', '{ach["id"]}')
-                        ON CONFLICT DO NOTHING
+                        VALUES ('{player_id}', '{ach["id"]}') ON CONFLICT DO NOTHING
                     """)
                     new_achievements.append(ach["id"])
                     bonus_xp += ach["xp"]
@@ -69,10 +66,9 @@ def check_achievements(cur, player_id: str, session: dict, stats: dict) -> list:
 def handler(event: dict, context) -> dict:
     cors = {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
     }
-
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": cors, "body": ""}
 
@@ -102,59 +98,127 @@ def handler(event: dict, context) -> dict:
         if method == "GET" and action == "sessions":
             player_id = qs.get("player_id", "ИГРОК_001")
             cur.execute(f"""
-                SELECT id, score, duration, accuracy, level, xp_earned, played_at
+                SELECT id, score, duration, accuracy, level, xp_earned, penalty_xp, played_at
                 FROM {SCHEMA}.sessions
                 WHERE player_id = '{player_id}'
                 ORDER BY played_at DESC LIMIT 50
             """)
             rows = cur.fetchall()
             sessions = [{"id": r[0], "score": r[1], "duration": r[2], "accuracy": r[3],
-                         "level": r[4], "xp_earned": r[5],
-                         "date": r[6].strftime("%d %b") if r[6] else ""} for r in rows]
+                         "level": r[4], "xp_earned": r[5], "penalty_xp": r[6],
+                         "date": r[7].strftime("%d %b") if r[7] else ""} for r in rows]
             conn.close()
             return {"statusCode": 200, "headers": cors, "body": json.dumps({"sessions": sessions}, ensure_ascii=False)}
 
-        # POST — добавить сессию
-        if method == "POST":
+        # GET ?action=leaderboard
+        if method == "GET" and action == "leaderboard":
+            player_id = qs.get("player_id", "ИГРОК_001")
+            cur.execute(f"""
+                SELECT player_id, nickname, avatar_id, xp,
+                       RANK() OVER (ORDER BY xp DESC) as rank
+                FROM {SCHEMA}.players
+                ORDER BY xp DESC
+            """)
+            rows = cur.fetchall()
+            board = [{"player_id": r[0], "nickname": r[1], "avatar_id": r[2],
+                      "xp": r[3], "rank": r[4], "is_me": r[0] == player_id} for r in rows]
+            conn.close()
+            return {"statusCode": 200, "headers": cors, "body": json.dumps({"leaderboard": board}, ensure_ascii=False)}
+
+        # GET ?action=penalties
+        if method == "GET" and action == "penalties":
+            player_id = qs.get("player_id", "ИГРОК_001")
+            cur.execute(f"""
+                SELECT id, penalty_xp, reason, issued_at
+                FROM {SCHEMA}.penalties
+                WHERE player_id = '{player_id}'
+                ORDER BY issued_at DESC LIMIT 20
+            """)
+            rows = cur.fetchall()
+            penalties = [{"id": r[0], "penalty_xp": r[1], "reason": r[2],
+                          "date": r[3].strftime("%d %b") if r[3] else ""} for r in rows]
+            conn.close()
+            return {"statusCode": 200, "headers": cors, "body": json.dumps({"penalties": penalties}, ensure_ascii=False)}
+
+        # POST — добавить сессию (action пустой)
+        if method == "POST" and action == "":
             body = json.loads(event.get("body") or "{}")
             player_id = body.get("player_id", "ИГРОК_001")
             score = int(body.get("score", 0))
             duration = int(body.get("duration", 0))
             accuracy = int(body.get("accuracy", 0))
             level = body.get("level", "Средний")
+            penalty_xp = max(0, int(body.get("penalty_xp", 0)))
 
             xp_earned = calc_xp(score, accuracy, duration)
+            net_xp = max(0, xp_earned - penalty_xp)
+
             cur.execute(f"""
-                INSERT INTO {SCHEMA}.sessions (player_id, score, duration, accuracy, level, xp_earned)
-                VALUES ('{player_id}', {score}, {duration}, {accuracy}, '{level}', {xp_earned})
+                INSERT INTO {SCHEMA}.sessions (player_id, score, duration, accuracy, level, xp_earned, penalty_xp)
+                VALUES ('{player_id}', {score}, {duration}, {accuracy}, '{level}', {xp_earned}, {penalty_xp})
             """)
+
+            if penalty_xp > 0:
+                reason = body.get("penalty_reason", "Штраф за нарушение").replace("'", "''")
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.penalties (player_id, penalty_xp, reason)
+                    VALUES ('{player_id}', {penalty_xp}, '{reason}')
+                """)
 
             stats = get_player_stats(cur, player_id)
             new_achs, bonus_xp = check_achievements(cur, player_id, body, stats)
-            total_xp = xp_earned + bonus_xp
+            total_delta = net_xp + bonus_xp
 
-            cur.execute(f"UPDATE {SCHEMA}.players SET xp = xp + {total_xp} WHERE player_id = '{player_id}'")
+            cur.execute(f"""
+                UPDATE {SCHEMA}.players
+                SET xp = GREATEST(0, xp + {total_delta})
+                WHERE player_id = '{player_id}'
+            """)
             cur.execute(f"SELECT xp FROM {SCHEMA}.players WHERE player_id = '{player_id}'")
             new_total_xp = cur.fetchone()[0]
             conn.commit()
             conn.close()
             return {"statusCode": 200, "headers": cors, "body": json.dumps({
-                "xp_earned": xp_earned, "bonus_xp": bonus_xp,
+                "xp_earned": xp_earned, "penalty_xp": penalty_xp,
+                "net_xp": net_xp, "bonus_xp": bonus_xp,
                 "total_xp": new_total_xp, "new_achievements": new_achs
             }, ensure_ascii=False)}
 
-        # PUT ?action=profile — обновить аватар/никнейм
+        # POST ?action=penalty — отдельный штраф
+        if method == "POST" and action == "penalty":
+            body = json.loads(event.get("body") or "{}")
+            player_id = body.get("player_id", "ИГРОК_001")
+            penalty_xp = max(0, int(body.get("penalty_xp", 0)))
+            reason = body.get("reason", "Штраф").replace("'", "''")
+
+            cur.execute(f"""
+                INSERT INTO {SCHEMA}.penalties (player_id, penalty_xp, reason)
+                VALUES ('{player_id}', {penalty_xp}, '{reason}')
+            """)
+            cur.execute(f"""
+                UPDATE {SCHEMA}.players
+                SET xp = GREATEST(0, xp - {penalty_xp})
+                WHERE player_id = '{player_id}'
+            """)
+            cur.execute(f"SELECT xp FROM {SCHEMA}.players WHERE player_id = '{player_id}'")
+            new_xp = cur.fetchone()[0]
+            conn.commit()
+            conn.close()
+            return {"statusCode": 200, "headers": cors, "body": json.dumps({
+                "ok": True, "penalty_xp": penalty_xp, "total_xp": new_xp
+            }, ensure_ascii=False)}
+
+        # PUT ?action=profile
         if method == "PUT" and action == "profile":
             body = json.loads(event.get("body") or "{}")
             player_id = body.get("player_id", "ИГРОК_001")
             avatar_id = body.get("avatar_id", "")
             nickname = body.get("nickname", "")
-
             sets = []
             if avatar_id:
                 sets.append(f"avatar_id = '{avatar_id}'")
             if nickname:
-                sets.append(f"nickname = '{nickname}'")
+                sets.append(f"nickname = '{nickname.replace(chr(39), chr(39)*2)}'")
             if sets:
                 cur.execute(f"UPDATE {SCHEMA}.players SET {', '.join(sets)} WHERE player_id = '{player_id}'")
                 conn.commit()
