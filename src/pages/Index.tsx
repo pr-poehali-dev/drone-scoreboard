@@ -735,17 +735,18 @@ function TeacherStudents({ token, onSelectPlayer }: { token: string; onSelectPla
       ) : (
         <div className="space-y-2">
           {students.map((s, i) => {
-            const lvl = getLevelInfo(s.xp);
+            const xp = s.xp ?? 0;
+            const lvl = getLevelInfo(xp);
             return (
               <div key={s.login} className="flex items-center gap-3 rounded-xl border border-white/6 bg-card px-4 py-3 transition-all animate-fade-in-up hover:border-white/15"
                 style={{ animationDelay: `${i * 40}ms` }}>
-                <div className="text-2xl shrink-0">{getAvatarEmoji(s.avatar_id)}</div>
+                <div className="text-2xl shrink-0">{getAvatarEmoji(s.avatar_id ?? "boy_1")}</div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-rajdhani font-semibold text-sm text-white truncate">{s.nickname}</div>
+                  <div className="font-rajdhani font-semibold text-sm text-white truncate">{s.nickname ?? "—"}</div>
                   <div className="text-xs text-muted-foreground">@{s.login} · {s.created_at}</div>
                 </div>
                 <div className="text-right shrink-0">
-                  <div className="font-orbitron text-sm font-bold" style={{ color: lvl.color }}>{s.xp.toLocaleString()} XP</div>
+                  <div className="font-orbitron text-sm font-bold" style={{ color: lvl.color }}>{xp.toLocaleString()} XP</div>
                   <div className="text-xs text-muted-foreground">Ур. {lvl.level}</div>
                 </div>
                 <button onClick={() => setConfirmLogin(s.login)}
