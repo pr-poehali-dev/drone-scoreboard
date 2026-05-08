@@ -254,7 +254,7 @@ function LoginPage({ onLogin }: { onLogin: (u: AuthUser) => void }) {
           <h1 className="font-orbitron text-3xl font-black text-white animate-flicker" style={{ letterSpacing: "0.1em" }}>
             БАС<span style={{ color: "#00ffaa" }}>_</span>АРЕНА
           </h1>
-          <p className="text-muted-foreground font-rajdhani mt-2">Боевая Авиационная Система · Рейтинг</p>
+          <p className="text-muted-foreground font-rajdhani mt-2">Беспилотная Авиационная Система · Рейтинг</p>
         </div>
 
         {/* Form */}
